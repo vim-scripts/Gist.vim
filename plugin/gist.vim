@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 13-May-2010.
-" Version: 3.6
+" Last Change: 04-Jun-2010.
+" Version: 3.7
 " WebPage: http://github.com/mattn/gist-vim/tree/master
 " Usage:
 "
@@ -179,6 +179,8 @@ function! s:GistList(user, token, gistls)
     exec 'silent split gist:'.a:gistls
   endif
 
+  setlocal foldmethod=manual
+
   if g:gist_show_privates
     let password = inputsecret('Password:')
     if len(password) == 0
@@ -197,6 +199,9 @@ function! s:GistList(user, token, gistls)
   else
     silent %d _
     exec 'silent r! curl -s '.url
+  endif
+  if exists("g:hoge")
+      return
   endif
 
   silent normal! ggdd
@@ -435,7 +440,7 @@ function! s:GistPost(user, token, content, private)
   " find GistID: in content , then we should just update
   for l in split( a:content , "\n" )
     if l =~ '\<GistID:'
-      let gistid = matchstr( l , '\(GistID:\s*\)\@<=[0-9]\+')
+      let gistid = matchstr( l , 'GistID:\s*\zs\d\+')
 
       if strlen(gistid) == 0
         echohl WarningMsg | echo "GistID error" | echohl None
@@ -446,7 +451,7 @@ function! s:GistPost(user, token, content, private)
       cal s:GistUpdate( a:user , a:token ,  a:content , gistid , '' )
       return
     elseif l =~ '\<Gist:'
-      let gistid = matchstr( l , '\(Gist:\s*http://gist.github.com/\)\@<=[0-9]\+')
+      let gistid = matchstr( l , 'Gist:\s*http://gist.github.com/\zs\d\+')
 
       if strlen(gistid) == 0
         echohl WarningMsg | echo "GistID error" | echohl None
