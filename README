@@ -12,6 +12,7 @@ Usage:
 
   :Gist -p
     post whole text to gist with private.
+    if you got empty gist list, try :Gist --abandon 
 
   :Gist -a
     post whole text to gist with anonymous.
@@ -28,6 +29,10 @@ Usage:
 
   :Gist -d
     delete the gist. (should be work on gist buffer)
+    password authentication is needed.
+
+  :Gist -f
+    fork the gist. (should be work on gist buffer)
     password authentication is needed.
 
   :Gist XXXXX
