@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 04-Jan-2011.
-" Version: 4.7
+" Last Change: 15-Apr-2011.
+" Version: 4.9
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 " Usage:
@@ -92,6 +92,14 @@
 "
 "     let g:gist_show_privates = 1
 "
+"   * if you want to copy URL of the post...
+"
+"     let g:gist_put_url_to_clipboard_after_post = 1
+"
+"     or if you want to add linefeed more,
+"
+"     let g:gist_put_url_to_clipboard_after_post = 2
+"
 " Thanks:
 "   MATSUU Takuto:
 "     removed carriage return
@@ -124,6 +132,10 @@ if !exists('g:gist_put_url_to_clipboard_after_post')
   let g:gist_put_url_to_clipboard_after_post = 1
 endif
 
+if !exists('g:gist_curl_options')
+  let g:gist_curl_options = ""
+endif
+
 if !exists('g:gist_browser_command')
   if has('win32')
     let g:gist_browser_command = "!start rundll32 url.dll,FileProtocolHandler %URL%"
@@ -142,6 +154,10 @@ endif
 
 if !exists('g:gist_show_privates')
   let g:gist_show_privates = 0
+endif
+
+if !exists('g:gist_cookie_dir')
+  let g:gist_cookie_dir = substitute(expand('<sfile>:p:h'), '[/\\]plugin$', '', '').'/cookies'
 endif
 
 function! s:nr2hex(nr)
@@ -173,6 +189,8 @@ function! s:encodeURIComponent(instr)
   return outstr
 endfunction
 
+" Note: A colon in the file name has side effects on Windows due to NTFS Alternate Data Streams; avoid it. 
+let s:bufprefix = 'gist' . (has('unix') ? ':' : '_')
 function! s:GistList(user, token, gistls, page)
   if a:gistls == '-all'
     let url = 'https://gist.github.com/gists'
@@ -181,14 +199,14 @@ function! s:GistList(user, token, gistls, page)
   else
     let url = 'https://gist.github.com/'.a:gistls
   endif
-  let winnum = bufwinnr(bufnr('gist:'.a:gistls))
+  let winnum = bufwinnr(bufnr(s:bufprefix.a:gistls))
   if winnum != -1
     if winnum != bufwinnr('%')
       exe "normal \<c-w>".winnum."w"
     endif
     setlocal modifiable
   else
-    exec 'silent split gist:'.a:gistls
+    exec 'silent split' s:bufprefix.a:gistls
   endif
   if a:page > 1
     let oldlines = getline(0, line('$'))
@@ -204,7 +222,7 @@ function! s:GistList(user, token, gistls, page)
     silent put =res.content
   else
     silent %d _
-    exec 'silent r! curl -s '.url
+    exec 'silent r! curl -s '.g:gist_curl_options.' '.url
   endif
 
   silent normal! ggdd
@@ -247,7 +265,7 @@ endfunction
 
 function! s:GistGetFileName(gistid)
   let url = 'https://gist.github.com/'.a:gistid
-  let res = system('curl -s '.url)
+  let res = system('curl -s '.g:gist_curl_options.' '.url)
   let res = substitute(res, '^.*<a href="/raw/[^"]\+/\([^"]\+\)".*$', '\1', '')
   if res =~ '/'
     return ''
@@ -259,7 +277,7 @@ endfunction
 function! s:GistDetectFiletype(gistid)
   let url = 'https://gist.github.com/'.a:gistid
   let mx = '^.*<div class=".\{-}type-\([^"]\+\)">.*$'
-  let res = system('curl -s '.url)
+  let res = system('curl -s '.g:gist_curl_options.' '.url)
   let res = substitute(matchstr(res, mx), mx, '\1', '')
   let res = substitute(res, '.*\(\.[^\.]\+\)$', '\1', '')
   let res = substitute(res, '-', '', 'g')
@@ -289,18 +307,18 @@ endfunction
 
 function! s:GistGet(user, token, gistid, clipboard)
   let url = 'https://gist.github.com/'.a:gistid.'.txt'
-  let winnum = bufwinnr(bufnr('gist:'.a:gistid))
+  let winnum = bufwinnr(bufnr(s:bufprefix.a:gistid))
   if winnum != -1
     if winnum != bufwinnr('%')
       exe "normal \<c-w>".winnum."w"
     endif
     setlocal modifiable
   else
-    exec 'silent split gist:'.a:gistid
+    exec 'silent split' s:bufprefix.a:gistid
   endif
   filetype detect
   silent %d _
-  exec 'silent 0r! curl -s '.url
+  exec 'silent 0r! curl -s '.g:gist_curl_options.' '.url
   normal! Gd_
   setlocal buftype=acwrite bufhidden=delete noswapfile
   setlocal nomodified
@@ -366,40 +384,43 @@ function! s:GistUpdate(user, token, content, gistid, gistnm)
   echon 'Updating it to gist... '
   let quote = &shellxquote == '"' ?  "'" : '"'
   let url = 'https://gist.github.com/gists/'.a:gistid
-  let res = system('curl -i -d @'.quote.file.quote.' '.url)
+  let res = system('curl -i '.g:gist_curl_options.' -d @'.quote.file.quote.' '.url)
   call delete(file)
-  let res = matchstr(split(res, '\(\r\?\n\|\r\n\?\)'), '^Location: ')
-  let res = substitute(res, '^[^:]\+: ', '', '')
-  if len(res) > 0 && res =~ '^\(http\|https\):\/\/gist\.github\.com\/'
+  let headers = split(res, '\(\r\?\n\|\r\n\?\)')
+  let location = matchstr(headers, '^Location: ')
+  let location = substitute(location, '^[^:]\+: ', '', '')
+  if len(location) > 0 && location =~ '^\(http\|https\):\/\/gist\.github\.com\/'
     setlocal nomodified
-    echo 'Done: '.res
+    redraw
+    echo 'Done: '.location
   else
-    echoerr 'Edit failed'
+    let message = matchstr(headers, '^Status: ')
+    let message = substitute(message, '^[^:]\+: [0-9]\+ ', '', '')
+    echoerr 'Edit failed: '.message
   endif
-  return res
+  return location
 endfunction
 
-let s:cookiedir = substitute(expand('<sfile>:p:h'), '[/\\]plugin$', '', '').'/cookies'
 function! s:GistGetPage(url, user, param, opt)
-  if !isdirectory(s:cookiedir)
-    call mkdir(s:cookiedir, 'p')
+  if !isdirectory(g:gist_cookie_dir)
+    call mkdir(g:gist_cookie_dir, 'p')
   endif
-  let cookiefile = s:cookiedir.'/github'
+  let cookie_file = g:gist_cookie_dir.'/github'
 
   if len(a:url) == 0
-    call delete(cookiefile)
+    call delete(cookie_file)
     return
   endif
 
   let quote = &shellxquote == '"' ?  "'" : '"'
-  if !filereadable(cookiefile)
+  if !filereadable(cookie_file)
     let password = inputsecret('Password:')
     if len(password) == 0
       echo 'Canceled'
       return
     endif
     let url = 'https://gist.github.com/login?return_to=gist'
-    let res = system('curl -L -s -k -c '.quote.cookiefile.quote.' '.quote.url.quote)
+    let res = system('curl -L -s '.g:gist_curl_options.' -c '.quote.cookie_file.quote.' '.quote.url.quote)
     let token = substitute(res, '^.* name="authenticity_token" type="hidden" value="\([^"]\+\)".*$', '\1', '')
 
     let query = [
@@ -416,9 +437,9 @@ function! s:GistGetPage(url, user, param, opt)
     unlet query
 
     let file = tempname()
-    let command = 'curl -s -k -i'
-    let command .= ' -b '.quote.cookiefile.quote
-    let command .= ' -c '.quote.cookiefile.quote
+    let command = 'curl -s '.g:gist_curl_options.' -i'
+    let command .= ' -b '.quote.cookie_file.quote
+    let command .= ' -c '.quote.cookie_file.quote
     let command .= ' '.quote.'https://gist.github.com/session'.quote
     let command .= ' -d @' . quote.file.quote
     call writefile([squery], file)
@@ -427,15 +448,15 @@ function! s:GistGetPage(url, user, param, opt)
     let res = matchstr(split(res, '\(\r\?\n\|\r\n\?\)'), '^Location: ')
     let res = substitute(res, '^[^:]\+: ', '', '')
     if len(res) == 0
-      call delete(cookiefile)
+      call delete(cookie_file)
       return ''
     endif
   endif
-  let command = 'curl -s -k -i '.a:opt
+  let command = 'curl -s '.g:gist_curl_options.' -i '.a:opt
   if len(a:param)
     let command .= ' -d '.quote.a:param.quote
   endif
-  let command .= ' -b '.quote.cookiefile.quote
+  let command .= ' -b '.quote.cookie_file.quote
   let command .= ' '.quote.a:url.quote
   let res = iconv(system(command), "utf-8", &encoding)
   let pos = stridx(res, "\r\n\r\n")
@@ -454,14 +475,21 @@ endfunction
 function! s:GistDelete(user, token, gistid)
   echon 'Deleting gist... '
   let res = s:GistGetPage('https://gist.github.com/'.a:gistid, a:user, '', '')
+  if (!len(res)) 
+      echoerr 'Wrong password? no response received from github trying to delete ' . a:gistid
+      return
+  endif
   let mx = '^.* name="authenticity_token" type="hidden" value="\([^"]\+\)".*$'
   let token = substitute(matchstr(res.content, mx), mx, '\1', '')
   if len(token) > 0
     let res = s:GistGetPage('https://gist.github.com/delete/'.a:gistid, a:user, '_method=delete&authenticity_token='.token, '')
     if len(res.content) > 0
+      redraw
       echo 'Done: '
     else
-      echoerr 'Delete failed'
+      let message = matchstr(res.header, '^Status: ')
+      let message = substitute(message, '^[^:]\+: [0-9]\+ ', '', '')
+      echoerr 'Delete failed: '.message
     endif
   else
     echoerr 'Delete failed'
@@ -486,10 +514,10 @@ endfunction
 "
 function! s:GistPost(user, token, content, private)
 
-  " find GistID: in content , then we should just update
-  for l in split( a:content , "\n" )
+  " find GistID: in content, then we should just update
+  for l in split(a:content, "\n")
     if l =~ '\<GistID:'
-      let gistid = matchstr( l , 'GistID:\s*\zs\d\+')
+      let gistid = matchstr(l, 'GistID:\s*[0-9a-z]\+')
 
       if strlen(gistid) == 0
         echohl WarningMsg | echo "GistID error" | echohl None
@@ -497,10 +525,10 @@ function! s:GistPost(user, token, content, private)
       endif
       echo "Found GistID: " . gistid
 
-      cal s:GistUpdate( a:user , a:token ,  a:content , gistid , '' )
+      cal s:GistUpdate(a:user, a:token,  a:content, gistid, '')
       return
     elseif l =~ '\<Gist:'
-      let gistid = matchstr( l , 'Gist:\s*https://gist.github.com/\zs\d\+')
+      let gistid = matchstr(l, 'Gist:\s*https://gist.github.com/[0-9a-z]\+')
 
       if strlen(gistid) == 0
         echohl WarningMsg | echo "GistID error" | echohl None
@@ -508,7 +536,7 @@ function! s:GistPost(user, token, content, private)
       endif
       echo "Found GistID: " . gistid
 
-      cal s:GistUpdate( a:user , a:token ,  a:content , gistid , '' )
+      cal s:GistUpdate(a:user, a:token,  a:content, gistid, '')
       return
     endif
   endfor
@@ -546,16 +574,20 @@ function! s:GistPost(user, token, content, private)
   echon 'Posting it to gist... '
   let quote = &shellxquote == '"' ?  "'" : '"'
   let url = 'https://gist.github.com/gists'
-  let res = system('curl -i -d @'.quote.file.quote.' '.url)
+  let res = system('curl -i '.g:gist_curl_options.' -d @'.quote.file.quote.' '.url)
   call delete(file)
-  let res = matchstr(split(res, '\(\r\?\n\|\r\n\?\)'), '^Location: ')
-  let res = substitute(res, '^[^:]\+: ', '', '')
-  if len(res) > 0 && res =~ '^\(http\|https\):\/\/gist\.github\.com\/'
-    echo 'Done: '.res
+  let headers = split(res, '\(\r\?\n\|\r\n\?\)')
+  let location = matchstr(headers, '^Location: ')
+  let location = substitute(location, '^[^:]\+: ', '', '')
+  if len(location) > 0 && location =~ '^\(http\|https\):\/\/gist\.github\.com\/'
+    redraw
+    echo 'Done: '.location
   else
-    echoerr 'Post failed'
+    let message = matchstr(headers, '^Status: ')
+    let message = substitute(message, '^[^:]\+: [0-9]\+ ', '', '')
+    echoerr 'Post failed: '.message
   endif
-  return res
+  return location
 endfunction
 
 function! s:GistPostBuffers(user, token, private)
@@ -606,11 +638,12 @@ function! s:GistPostBuffers(user, token, private)
   echo "Posting it to gist... "
   let quote = &shellxquote == '"' ?  "'" : '"'
   let url = 'https://gist.github.com/gists'
-  let res = system('curl -i -d @'.quote.file.quote.' '.url)
+  let res = system('curl -i '.g:gist_curl_options.' -d @'.quote.file.quote.' '.url)
   call delete(file)
   let res = matchstr(split(res, '\(\r\?\n\|\r\n\?\)'), '^Location: ')
   let res = substitute(res, '^.*: ', '', '')
   if len(res) > 0 && res =~ '^\(http\|https\):\/\/gist\.github\.com\/'
+    redraw
     echo 'Done: '.res
   else
     echoerr 'Post failed'
@@ -654,7 +687,7 @@ function! Gist(line1, line2, ...)
   let deletepost = 0
   let editpost = 0
   let listmx = '^\(-l\|--list\)\s*\([^\s]\+\)\?$'
-  let bufnamemx = '^gist:\([0-9a-f]\+\)$'
+  let bufnamemx = '^' . s:bufprefix .'\([0-9a-f]\+\)$'
 
   let args = (a:0 > 0) ? split(a:1, ' ') : []
   for arg in args
@@ -689,7 +722,7 @@ function! Gist(line1, line2, ...)
       let res = s:GistGetPage("https://gist.github.com/fork/".gistid, g:github_user, '', '')
       let loc = filter(res.header, 'v:val =~ "^Location:"')[0]
       let loc = substitute(loc, '^[^:]\+: ', '', '')
-      let mx = '^https://gist.github.com/\(\d\+\)$'
+      let mx = '^https://gist.github.com/\([0-9a-z]\+\)$'
       if loc =~ mx
         let gistid = substitute(loc, mx, '\1', '')
       else
@@ -701,7 +734,7 @@ function! Gist(line1, line2, ...)
         let gistnm = arg
       elseif len(gistls) > 0 && arg != '^\w\+$'
         let gistls = arg
-      elseif arg =~ '^\d\+$'
+      elseif arg =~ '^[0-9a-z]\+$'
         let gistid = arg
       else
         echoerr 'Invalid arguments'
@@ -746,13 +779,18 @@ function! Gist(line1, line2, ...)
         let cmd = substitute(g:gist_browser_command, '%URL%', url, 'g')
         if cmd =~ '^!'
           silent! exec cmd
+        elseif cmd =~ '^:[A-Z]'
+          exec cmd
         else
           call system(cmd)
         endif
       endif
-      if g:gist_put_url_to_clipboard_after_post == 1
+      if g:gist_put_url_to_clipboard_after_post > 0
+        if g:gist_put_url_to_clipboard_after_post == 2
+          let url = url . "\n"
+        endif
         if exists('g:gist_clip_command')
-          call system('echo '.url.' | '.g:gist_clip_command)
+          call system(g:gist_clip_command, url)
         elseif has('unix') && !has('xterm_clipboard')
           let @" = url
         else
