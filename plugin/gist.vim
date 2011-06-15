@@ -1,57 +1,66 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 15-Apr-2011.
-" Version: 4.9
+" Last Change: 15-Jun-2011.
+" Version: 5.0
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 " Usage:
 "
 "   :Gist
-"     post whole text to gist.
+"     post current buffer to gist, using default privicy option
+"     (see g:gist_private)
 "
 "   :'<,'>Gist
-"     post selected text to gist.
+"     post selected text to gist., using default privicy option
+"     This applies to all permutations listed below (except multi)
+"     (see g:gist_private)
 "
 "   :Gist -p
-"     post whole text to gist with private.
-"     if you got empty gist list, try :Gist --abandon
+"     create a private gist
 "
+"   :Gist -P
+"     create a public gist
+"     (only relevant if you've set gists to be private by default)
+"
+"   :Gist -P
+"     post whole text to gist as public
+"     This is only relevant if you've set gists to be private by default
 "   :Gist -a
-"     post whole text to gist with anonymous.
+"     create a gist anonymously
 "
 "   :Gist -m
-"     post multi buffer to gist.
+"     create a gist with all open buffers
 "
 "   :Gist -e
-"     edit the gist. (shoud be work on gist buffer)
-"     you can update the gist with :w command on gist buffer.
+"     edit the gist. (you need to have opend the gist buffer first)
+"     you can update the gist with :w command on gist buffer
 "
 "   :Gist -d
-"     delete the gist. (should be work on gist buffer)
-"     password authentication is needed.
+"     delete the gist. (you need to have opend the gist buffer first)
+"     password authentication is needed
 "
 "   :Gist -f
-"     fork the gist. (should be work on gist buffer)
-"     password authentication is needed.
+"     fork the gist. (you need to have opend the gist buffer first)
+"     password authentication is needed
 "
 "   :Gist -e foo.js
-"     edit the gist with name 'foo.js'. (shoud be work on gist buffer)
+"     edit the gist with name 'foo.js'. (you need to have opend the gist buffer first)
 "
 "   :Gist XXXXX
-"     edit gist XXXXX.
+"     get gist XXXXX
 "
-"   :Gist -c XXXXX.
-"     get gist XXXXX and put to clipboard.
+"   :Gist -c XXXXX
+"     get gist XXXXX and add to clipboard
 "
 "   :Gist -l
-"     list gists from mine.
+"     list your public gists
 "
 "   :Gist -l mattn
-"     list gists from mattn.
+"     list gists from mattn
 "
 "   :Gist -la
-"     list gists from all.
+"     list all your (public and private) gists
 "
 " Tips:
 "   * if set g:gist_clip_command, gist.vim will copy the gist code
@@ -92,13 +101,15 @@
 "
 "     let g:gist_show_privates = 1
 "
-"   * if you want to copy URL of the post...
+"   * if don't you want to copy URL of the post...
 "
-"     let g:gist_put_url_to_clipboard_after_post = 1
+"     let g:gist_put_url_to_clipboard_after_post = 0
 "
-"     or if you want to add linefeed more,
+"     or if you want to copy URL and add linefeed at the last of URL,
 "
 "     let g:gist_put_url_to_clipboard_after_post = 2
+"
+"     default value is 1.
 "
 " Thanks:
 "   MATSUU Takuto:
@@ -150,6 +161,10 @@ endif
 
 if !exists('g:gist_detect_filetype')
   let g:gist_detect_filetype = 0
+endif
+
+if !exists('g:gist_private')
+  let g:gist_private = 0
 endif
 
 if !exists('g:gist_show_privates')
@@ -302,11 +317,13 @@ function! s:GistWrite(fname)
     Gist -e
   else
     exe "w".(v:cmdbang ? "!" : "")." ".fnameescape(v:cmdarg)." ".fnameescape(a:fname)
+    silent! exe "file ".fnameescape(a:fname)
+    silent! au! BufWriteCmd <buffer>
   endif
 endfunction
 
 function! s:GistGet(user, token, gistid, clipboard)
-  let url = 'https://gist.github.com/'.a:gistid.'.txt'
+  let url = 'https://raw.github.com/gist/'.a:gistid
   let winnum = bufwinnr(bufnr(s:bufprefix.a:gistid))
   if winnum != -1
     if winnum != bufwinnr('%')
@@ -591,7 +608,7 @@ function! s:GistPost(user, token, content, private)
 endfunction
 
 function! s:GistPostBuffers(user, token, private)
-  let bufnrs = range(1, last_buffer_nr())
+  let bufnrs = range(1, bufnr("$"))
   let bn = bufnr('%')
   let query = []
   if len(a:user) > 0 && len(a:token) > 0
@@ -616,7 +633,7 @@ function! s:GistPostBuffers(user, token, private)
 
   let index = 1
   for bufnr in bufnrs
-    if buflisted(bufnr) == 0 || bufwinnr(bufnr) == -1
+    if !bufexists(bufnr) || buflisted(bufnr) == 0
       continue
     endif
     echo "Creating gist content".index."... "
@@ -681,7 +698,7 @@ function! Gist(line1, line2, ...)
   let gistid = ''
   let gistls = ''
   let gistnm = ''
-  let private = 0
+  let private = g:gist_private
   let multibuffer = 0
   let clipboard = 0
   let deletepost = 0
@@ -691,33 +708,35 @@ function! Gist(line1, line2, ...)
 
   let args = (a:0 > 0) ? split(a:1, ' ') : []
   for arg in args
-    if arg =~ '^\(-la\|--listall\)$'
+    if arg =~ '^\(-la\|--listall\)$\C'
       let gistls = '-all'
-    elseif arg =~ '^\(-l\|--list\)$'
+    elseif arg =~ '^\(-l\|--list\)$\C'
       if g:gist_show_privates
         let gistls = 'mine'
       else
         let gistls = g:github_user
       endif
-    elseif arg == '--abandon'
+    elseif arg == '--abandon\C'
       call s:GistGetPage('', '', '', '')
       return
-    elseif arg =~ '^\(-m\|--multibuffer\)$'
+    elseif arg =~ '^\(-m\|--multibuffer\)$\C'
       let multibuffer = 1
-    elseif arg =~ '^\(-p\|--private\)$'
+    elseif arg =~ '^\(-p\|--private\)$\C'
       let private = 1
-    elseif arg =~ '^\(-a\|--anonymous\)$'
+    elseif arg =~ '^\(-P\|--public\)$\C'
+      let private = 0
+    elseif arg =~ '^\(-a\|--anonymous\)$\C'
       let user = ''
       let token = ''
-    elseif arg =~ '^\(-c\|--clipboard\)$'
+    elseif arg =~ '^\(-c\|--clipboard\)$\C'
       let clipboard = 1
-    elseif arg =~ '^\(-d\|--delete\)$' && bufname =~ bufnamemx
+    elseif arg =~ '^\(-d\|--delete\)$\C' && bufname =~ bufnamemx
       let deletepost = 1
       let gistid = substitute(bufname, bufnamemx, '\1', '')
-    elseif arg =~ '^\(-e\|--edit\)$' && bufname =~ bufnamemx
+    elseif arg =~ '^\(-e\|--edit\)$\C' && bufname =~ bufnamemx
       let editpost = 1
       let gistid = substitute(bufname, bufnamemx, '\1', '')
-    elseif arg =~ '^\(-f\|--fork\)$' && bufname =~ bufnamemx
+    elseif arg =~ '^\(-f\|--fork\)$\C' && bufname =~ bufnamemx
       let gistid = substitute(bufname, bufnamemx, '\1', '')
       let res = s:GistGetPage("https://gist.github.com/fork/".gistid, g:github_user, '', '')
       let loc = filter(res.header, 'v:val =~ "^Location:"')[0]
@@ -732,9 +751,9 @@ function! Gist(line1, line2, ...)
     elseif arg !~ '^-' && len(gistnm) == 0
       if editpost == 1 || deletepost == 1
         let gistnm = arg
-      elseif len(gistls) > 0 && arg != '^\w\+$'
+      elseif len(gistls) > 0 && arg != '^\w\+$\C'
         let gistls = arg
-      elseif arg =~ '^[0-9a-z]\+$'
+      elseif arg =~ '^[0-9a-z]\+$\C'
         let gistid = arg
       else
         echoerr 'Invalid arguments'
