@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 15-Jun-2011.
-" Version: 5.0
+" Last Change: 16-Sep-2011.
+" Version: 5.1
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 " Usage:
@@ -126,12 +126,12 @@ endif
 let g:loaded_gist_vim = 1
 
 if (!exists('g:github_user') || !exists('g:github_token')) && !executable('git')
-  echoerr "Gist: require 'git' command"
+  echohl ErrorMsg | echomsg "Gist: require 'git' command" | echohl None
   finish
 endif
 
 if !executable('curl')
-  echoerr "Gist: require 'curl' command"
+  echohl ErrorMsg | echomsg "Gist: require 'curl' command" | echohl None
   finish
 endif
 
@@ -148,7 +148,7 @@ if !exists('g:gist_curl_options')
 endif
 
 if !exists('g:gist_browser_command')
-  if has('win32')
+  if has('win32') || has('win64')
     let g:gist_browser_command = "!start rundll32 url.dll,FileProtocolHandler %URL%"
   elseif has('mac')
     let g:gist_browser_command = "open %URL%"
@@ -217,7 +217,7 @@ function! s:GistList(user, token, gistls, page)
   let winnum = bufwinnr(bufnr(s:bufprefix.a:gistls))
   if winnum != -1
     if winnum != bufwinnr('%')
-      exe "normal \<c-w>".winnum."w"
+      exe winnum 'wincmd w'
     endif
     setlocal modifiable
   else
@@ -237,10 +237,10 @@ function! s:GistList(user, token, gistls, page)
     silent put =res.content
   else
     silent %d _
-    exec 'silent r! curl -s '.g:gist_curl_options.' '.url
+    exec 'silent r! curl -s' g:gist_curl_options url
   endif
 
-  silent normal! ggdd
+  1delete _
   silent! %s/>/>\r/g
   silent! %s/</\r</g
   silent! %g/<pre/,/<\/pre/join!
@@ -261,7 +261,7 @@ function! s:GistList(user, token, gistls, page)
   silent! %g/^gist: /s/ //g
 
   call append(0, oldlines)
-  normal! Gomore...
+  $put='more...'
 
   let b:user = a:user
   let b:token = a:token
@@ -270,7 +270,7 @@ function! s:GistList(user, token, gistls, page)
   setlocal buftype=nofile bufhidden=hide noswapfile
   setlocal nomodified
   syntax match SpecialKey /^gist:/he=e-1
-  exec 'nnoremap <silent> <buffer> <cr> :call <SID>GistListAction()<cr>'
+  nnoremap <silent> <buffer> <cr> :call <SID>GistListAction()<cr>
 
   cal cursor(1+len(oldlines),1)
   setlocal foldmethod=expr
@@ -316,8 +316,8 @@ function! s:GistWrite(fname)
   if substitute(a:fname, '\\', '/', 'g') == expand("%:p:gs@\\@/@")
     Gist -e
   else
-    exe "w".(v:cmdbang ? "!" : "")." ".fnameescape(v:cmdarg)." ".fnameescape(a:fname)
-    silent! exe "file ".fnameescape(a:fname)
+    exe "w".(v:cmdbang ? "!" : "") fnameescape(v:cmdarg) fnameescape(a:fname)
+    silent! exe "file" fnameescape(a:fname)
     silent! au! BufWriteCmd <buffer>
   endif
 endfunction
@@ -327,7 +327,7 @@ function! s:GistGet(user, token, gistid, clipboard)
   let winnum = bufwinnr(bufnr(s:bufprefix.a:gistid))
   if winnum != -1
     if winnum != bufwinnr('%')
-      exe "normal \<c-w>".winnum."w"
+      exe winnum 'wincmd w'
     endif
     setlocal modifiable
   else
@@ -335,8 +335,8 @@ function! s:GistGet(user, token, gistid, clipboard)
   endif
   filetype detect
   silent %d _
-  exec 'silent 0r! curl -s '.g:gist_curl_options.' '.url
-  normal! Gd_
+  exec 'silent 0r! curl -s' g:gist_curl_options url
+  $delete _
   setlocal buftype=acwrite bufhidden=delete noswapfile
   setlocal nomodified
   doau StdinReadPost <buffer>
@@ -347,10 +347,10 @@ function! s:GistGet(user, token, gistid, clipboard)
     if exists('g:gist_clip_command')
       exec 'silent w !'.g:gist_clip_command
     else
-      normal! gg"+yG
+      %yank +
     endif
   endif
-  normal! gg
+  1
   au! BufWriteCmd <buffer> call s:GistWrite(expand("<amatch>"))
 endfunction
 
@@ -363,7 +363,7 @@ function! s:GistListAction()
     return
   endif
   if line =~# '^more\.\.\.$'
-    normal! dd
+    delete
     call s:GistList(b:user, b:token, b:gistls, b:page+1)
     return
   endif
@@ -382,25 +382,41 @@ function! s:GistUpdate(user, token, content, gistid, gistnm)
   endif
   let query = [
     \ '_method=put',
-    \ 'file_ext[gistfile1%s]=%s',
-    \ 'file_name[gistfile1%s]=%s',
-    \ 'file_contents[gistfile1%s]=%s',
+    \ 'file_ext[gistfile1]=%s',
+    \ 'file_name[gistfile1]=%s',
+    \ 'file_contents[gistfile1]=%s',
     \ 'login=%s',
     \ 'token=%s',
     \ ]
   let squery = printf(join(query, '&'),
-    \ s:encodeURIComponent(ext), s:encodeURIComponent(ext),
-    \ s:encodeURIComponent(ext), s:encodeURIComponent(name),
-    \ s:encodeURIComponent(ext), s:encodeURIComponent(a:content),
+    \ s:encodeURIComponent(ext),
+    \ s:encodeURIComponent(name),
+    \ s:encodeURIComponent(a:content),
     \ s:encodeURIComponent(a:user),
     \ s:encodeURIComponent(a:token))
   unlet query
+
+  let action = a:gistid
+  if a:gistid !~ '^\d\+$'
+    echon 'Login to gist... '
+    let res = s:GistGetPage('https://gist.github.com/'.a:gistid, a:user, '', '')
+    if (!len(res))
+      echohl ErrorMsg | echomsg 'Wrong password? no response received from github trying to update ' . a:gistid | echohl None
+      return
+    endif
+    let mx = '^.*<form action="/gists/\([^"]\+\)".*$'
+    let action = substitute(matchstr(res.content, mx), mx, '\1', '')
+    let mx = '^.* name="authenticity_token" type="hidden" value="\([^"]\+\)".*$'
+    let token = substitute(matchstr(res.content, mx), mx, '\1', '')
+    unlet res
+    let squery .= '&authenticity_token='.token
+  endif
 
   let file = tempname()
   call writefile([squery], file)
   echon 'Updating it to gist... '
   let quote = &shellxquote == '"' ?  "'" : '"'
-  let url = 'https://gist.github.com/gists/'.a:gistid
+  let url = 'https://gist.github.com/gists/'.action
   let res = system('curl -i '.g:gist_curl_options.' -d @'.quote.file.quote.' '.url)
   call delete(file)
   let headers = split(res, '\(\r\?\n\|\r\n\?\)')
@@ -413,7 +429,7 @@ function! s:GistUpdate(user, token, content, gistid, gistnm)
   else
     let message = matchstr(headers, '^Status: ')
     let message = substitute(message, '^[^:]\+: [0-9]\+ ', '', '')
-    echoerr 'Edit failed: '.message
+    echohl ErrorMsg | echomsg 'Edit failed: '.message | echohl None
   endif
   return location
 endfunction
@@ -493,8 +509,8 @@ function! s:GistDelete(user, token, gistid)
   echon 'Deleting gist... '
   let res = s:GistGetPage('https://gist.github.com/'.a:gistid, a:user, '', '')
   if (!len(res)) 
-      echoerr 'Wrong password? no response received from github trying to delete ' . a:gistid
-      return
+    echohl ErrorMsg | echomsg 'Wrong password? no response received from github trying to delete ' . a:gistid | echohl None
+    return
   endif
   let mx = '^.* name="authenticity_token" type="hidden" value="\([^"]\+\)".*$'
   let token = substitute(matchstr(res.content, mx), mx, '\1', '')
@@ -506,10 +522,10 @@ function! s:GistDelete(user, token, gistid)
     else
       let message = matchstr(res.header, '^Status: ')
       let message = substitute(message, '^[^:]\+: [0-9]\+ ', '', '')
-      echoerr 'Delete failed: '.message
+      echohl ErrorMsg | echomsg 'Delete failed: '.message | echohl None
     endif
   else
-    echoerr 'Delete failed'
+    echohl ErrorMsg | echomsg 'Delete failed' | echohl None
   endif
 endfunction
 
@@ -602,7 +618,7 @@ function! s:GistPost(user, token, content, private)
   else
     let message = matchstr(headers, '^Status: ')
     let message = substitute(message, '^[^:]\+: [0-9]\+ ', '', '')
-    echoerr 'Post failed: '.message
+    echohl ErrorMsg | echomsg 'Post failed: '.message | echohl None
   endif
   return location
 endfunction
@@ -637,7 +653,7 @@ function! s:GistPostBuffers(user, token, private)
       continue
     endif
     echo "Creating gist content".index."... "
-    silent! exec "buffer! ".bufnr
+    silent! exec "buffer!" bufnr
     let content = join(getline(1, line('$')), "\n")
     let ext = expand('%:e')
     let ext = len(ext) ? '.'.ext : ''
@@ -648,7 +664,7 @@ function! s:GistPostBuffers(user, token, private)
       \ s:encodeURIComponent(content))
     let index = index + 1
   endfor
-  silent! exec "buffer! ".bn
+  silent! exec "buffer!" bn
 
   let file = tempname()
   call writefile([squery], file)
@@ -663,7 +679,7 @@ function! s:GistPostBuffers(user, token, private)
     redraw
     echo 'Done: '.res
   else
-    echoerr 'Post failed'
+    echohl ErrorMsg | echomsg 'Post failed' | echohl None
   endif
   return res
 endfunction
@@ -682,7 +698,8 @@ function! Gist(line1, line2, ...)
     end
   endif
   if strlen(g:github_user) == 0 || strlen(g:github_token) == 0
-    echoerr "You have no setting for github."
+    echohl ErrorMsg
+    echomsg "You have no setting for github."
     echohl WarningMsg
     echo "git config --global github.user  your-name"
     echo "git config --global github.token your-token"
@@ -745,7 +762,7 @@ function! Gist(line1, line2, ...)
       if loc =~ mx
         let gistid = substitute(loc, mx, '\1', '')
       else
-        echoerr 'Fork failed'
+        echohl ErrorMsg | echomsg 'Fork failed' | echohl None
         return
       endif
     elseif arg !~ '^-' && len(gistnm) == 0
@@ -756,12 +773,12 @@ function! Gist(line1, line2, ...)
       elseif arg =~ '^[0-9a-z]\+$\C'
         let gistid = arg
       else
-        echoerr 'Invalid arguments'
+        echohl ErrorMsg | echomsg 'Invalid arguments' | echohl None
         unlet args
         return 0
       endif
     elseif len(arg) > 0
-      echoerr 'Invalid arguments'
+      echohl ErrorMsg | echomsg 'Invalid arguments' | echohl None
       unlet args
       return 0
     endif
