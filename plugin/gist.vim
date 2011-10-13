@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 16-Sep-2011.
-" Version: 5.1
+" Last Change: 13-Oct-2011.
+" Version: 5.2
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 " Usage:
@@ -240,6 +240,8 @@ function! s:GistList(user, token, gistls, page)
     exec 'silent r! curl -s' g:gist_curl_options url
   endif
 
+  let oldgdefault = &gdefault
+  let &gdefault = 0
   1delete _
   silent! %s/>/>\r/g
   silent! %s/</\r</g
@@ -259,6 +261,7 @@ function! s:GistList(user, token, gistls, page)
   silent! %s/&lt;/</g
   silent! %s/&#\(\d\d\);/\=nr2char(submatch(1))/g
   silent! %g/^gist: /s/ //g
+  let &gdefault = oldgdefault
 
   call append(0, oldlines)
   $put='more...'
@@ -801,7 +804,15 @@ function! Gist(line1, line2, ...)
     if multibuffer == 1
       let url = s:GistPostBuffers(user, token, private)
     else
-      let content = join(getline(a:line1, a:line2), "\n")
+      if visualmode() == ''
+        let content = join(getline(a:line1, a:line2), "\n")
+      else
+        let save_regcont = @"
+        let save_regtype = getregtype('"')
+        silent! normal! gvygv
+        let content = @"
+        call setreg('"', save_regcont, save_regtype)
+      endif
       if editpost == 1
         let url = s:GistUpdate(user, token, content, gistid, gistnm)
       elseif deletepost == 1
