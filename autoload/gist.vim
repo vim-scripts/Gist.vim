@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 22-Nov-2011.
-" Version: 5.7
+" Last Change: 31-Jan-2012.
+" Version: 5.9
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 " Usage:
@@ -184,11 +184,20 @@ function! s:encodeURIComponent(instr)
   return outstr
 endfunction
 
+function! s:shellwords(str)
+  let words = split(a:str, '\%(\([^ \t\''"]\+\)\|''\([^\'']*\)''\|"\(\%([^\"\\]\|\\.\)*\)"\)\zs\s*\ze')
+  let words = map(words, 'substitute(v:val, ''\\\([\\ ]\)'', ''\1'', "g")')
+  let words = map(words, 'matchstr(v:val, ''^\%\("\zs\(.*\)\ze"\|''''\zs\(.*\)\ze''''\|.*\)$'')')
+  return words
+endfunction
+
 " Note: A colon in the file name has side effects on Windows due to NTFS Alternate Data Streams; avoid it. 
 let s:bufprefix = 'gist' . (has('unix') ? ':' : '_')
 function! s:GistList(user, token, gistls, page)
   if a:gistls == '-all'
     let url = 'https://gist.github.com/gists'
+  elseif g:gist_show_privates && a:gistls == 'starred'
+    let url = 'https://gist.github.com/starred'
   elseif g:gist_show_privates && a:gistls == a:user
     let url = 'https://gist.github.com/mine'
   else
@@ -208,6 +217,7 @@ function! s:GistList(user, token, gistls, page)
     let url = url . '?page=' . a:page
   endif
 
+  setlocal modifiable
   setlocal foldmethod=manual
   let old_undolevels = &undolevels
   set undolevels=-1
@@ -237,12 +247,12 @@ function! s:GistList(user, token, gistls, page)
   silent! %s/>/>\r/g
   silent! %s/</\r</g
   silent! %g/<pre/,/<\/pre/join!
-  silent! %g/<span class="date"/,/<\/span/join
-  silent! %g/^<span class="date"/s/> */>/g
-  silent! %v/^\(gist:\|<pre>\|<span class="date">\)/d _
+  silent! %g/<div class="info"/,/<\/div/join
+  silent! %g/^<div class="info"/s/> */>/g
+  silent! %v/^\(<pre>\|<div class="info">\)/d _
+  silent! %s/<div class="info">//g
   silent! %s/<div[^>]*>/\r  /g
   silent! %s/<\/pre>/\r/g
-  silent! %g/^gist:/,/<span class="date"/join
   silent! %s/<[^>]\+>//g
   silent! %s/\r//g
   silent! %s/&nbsp;/ /g
@@ -251,7 +261,6 @@ function! s:GistList(user, token, gistls, page)
   silent! %s/&gt;/>/g
   silent! %s/&lt;/</g
   silent! %s/&#\(\d\d\);/\=nr2char(submatch(1))/g
-  silent! %g/^gist: /s/ //g
   let &gdefault = oldgdefault
 
   call append(0, oldlines)
@@ -264,8 +273,10 @@ function! s:GistList(user, token, gistls, page)
   let b:page = a:page
   setlocal buftype=nofile bufhidden=hide noswapfile
   setlocal nomodified
+  setlocal nomodifiable
   syntax match SpecialKey /^gist:/he=e-1
-  nnoremap <silent> <buffer> <cr> :call <SID>GistListAction()<cr>
+  nnoremap <silent> <buffer> <cr> :call <SID>GistListAction(0)<cr>
+  nnoremap <silent> <buffer> <s-cr> :call <SID>GistListAction(1)<cr>
 
   cal cursor(1+len(oldlines),1)
   setlocal foldmethod=expr
@@ -292,11 +303,10 @@ function! s:GistDetectFiletype(gistid)
   let mx = '^.*<div class=".\{-}type-\zs\([^"]\+\)\ze">.*$'
   let res = system('curl -s '.g:gist_curl_options.' '.url)
   let res = matchstr(res, mx)
-  let res = matchstr(res, '.*\zs\(\.[^\.]\+\)\ze$')
   let res = substitute(res, '-', '', 'g')
   if has_key(s:extmap, res)
     let res = s:extmap[res]
-  else
+  elseif index(values(s:extmap), res) == -1
     let res = ''
   endif
 
@@ -351,30 +361,43 @@ function! s:GistGet(user, token, gistid, clipboard)
   if a:clipboard
     if exists('g:gist_clip_command')
       exec 'silent w !'.g:gist_clip_command
+    elseif has('clipboard')
+      silent! %yank +
     else
-      %yank +
+      %yank
     endif
   endif
   1
   au! BufWriteCmd <buffer> call s:GistWrite(expand("<amatch>"))
 endfunction
 
-function! s:GistListAction()
+function! s:GistListAction(shift)
   let line = getline('.')
-  let mx = '^gist:\zs\(\w\+\)\ze.*'
+  let mx = '^gist:\s*\zs\(\w\+\)\ze.*'
   if line =~# mx
     let gistid = matchstr(line, mx)
-    call s:GistGet(g:github_user, g:github_token, gistid, 0)
+    if a:shift
+      let url = "https://gist.github.com/" . gistid
+      let cmd = substitute(g:gist_browser_command, '%URL%', url, 'g')
+      if cmd =~ '^!'
+        silent! exec cmd
+      elseif cmd =~ '^:[A-Z]'
+        exec cmd
+      else
+        call system(cmd)
+      endif
+    else
+      call s:GistGet(g:github_user, g:github_token, gistid, 0)
+    endif
     return
   endif
   if line =~# '^more\.\.\.$'
-    delete
     call s:GistList(b:user, b:token, b:gistls, b:page+1)
     return
   endif
 endfunction
 
-function! s:GistUpdate(user, token, content, gistid, gistnm)
+function! s:GistUpdate(user, token, content, gistid, gistnm, desc)
   if len(a:gistnm) == 0
     let name = s:GistGetFileName(a:gistid)
   else
@@ -399,6 +422,9 @@ function! s:GistUpdate(user, token, content, gistid, gistnm)
     \ s:encodeURIComponent(a:content),
     \ s:encodeURIComponent(a:user),
     \ s:encodeURIComponent(a:token))
+  if a:desc != ' '
+    let squery .= '&description='.s:encodeURIComponent(a:desc)
+  endif
   unlet query
 
   let action = a:gistid
@@ -432,7 +458,7 @@ function! s:GistUpdate(user, token, content, gistid, gistnm)
   if len(loc) > 0 && loc =~ '^\(http\|https\):\/\/gist\.github\.com\/'
     setlocal nomodified
     redraw
-    echo 'Done: '.loc
+    echomsg 'Done: '.loc
   else
     let message = matchstr(headers, '^Status:')
     let message = matchstr(message, '^[^:]\+:\s*[0-9]\+\s*\zs\(.*\)')
@@ -500,6 +526,15 @@ function! s:GistGetPage(url, user, param, opt)
   let command .= ' -b '.quote.cookie_file.quote
   let command .= ' '.quote.a:url.quote
   let res = iconv(system(command), "utf-8", &encoding)
+  if res =~ '^HTTP/1.\d 3' || res =~ '^HTTP/1\.\d 200 Connection established'
+    let pos = stridx(res, "\r\n\r\n")
+    if pos != -1
+      let res = res[pos+4:]
+    else
+      let pos = stridx(res, "\n\n")
+      let res = res[pos+2:]
+    endif
+  endif
   let pos = stridx(res, "\r\n\r\n")
   if pos != -1
     let content = res[pos+4:]
@@ -527,7 +562,7 @@ function! s:GistDelete(user, token, gistid)
     let res = s:GistGetPage('https://gist.github.com/delete/'.a:gistid, a:user, '_method=delete&authenticity_token='.token, '')
     if len(res.content) > 0
       redraw
-      echo 'Done: '
+      echomsg 'Done: '
     else
       let message = matchstr(res.headers, '^Status:')
       let message = matchstr(message, '^[^:]\+:\s*[0-9]\+\s*\zs\(.*\)')
@@ -554,7 +589,7 @@ endfunction
 "
 "       GistID: 123123
 "
-function! s:GistPost(user, token, content, private)
+function! s:GistPost(user, token, content, private, desc)
 
   " find GistID: in content, then we should just update
   for l in split(a:content, "\n")
@@ -618,6 +653,9 @@ function! s:GistPost(user, token, content, private)
     \ s:encodeURIComponent(a:content),
     \ s:encodeURIComponent(a:user),
     \ s:encodeURIComponent(a:token))
+  if a:desc != ' '
+    let squery .= '&description='.s:encodeURIComponent(a:desc)
+  endif
   unlet query
 
   let file = tempname()
@@ -633,7 +671,7 @@ function! s:GistPost(user, token, content, private)
   let loc = matchstr(loc, '^[^:]\+: \zs.*')
   if len(loc) > 0 && loc =~ '^\(http\|https\):\/\/gist\.github\.com\/'
     redraw
-    echo 'Done: '.loc
+    echomsg 'Done: '.loc
   else
     let message = matchstr(headers, '^Status:')
     let message = matchstr(message, '^[^:]\+:\s*[0-9]\+\s*\zs\(.*\)')
@@ -642,7 +680,7 @@ function! s:GistPost(user, token, content, private)
   return loc
 endfunction
 
-function! s:GistPostBuffers(user, token, private)
+function! s:GistPostBuffers(user, token, private, desc)
   let bufnrs = range(1, bufnr("$"))
   let bn = bufnr('%')
   let query = []
@@ -683,6 +721,9 @@ function! s:GistPostBuffers(user, token, private)
       \ s:encodeURIComponent(content))
     let index = index + 1
   endfor
+  if a:desc != ' '
+    let squery .= '&description='.s:encodeURIComponent(a:desc)
+  endif
   silent! exec "buffer!" bn
 
   let file = tempname()
@@ -697,11 +738,11 @@ function! s:GistPostBuffers(user, token, private)
   let loc = matchstr(loc, '^[^:]\+: \zs.*')
   if len(loc) > 0 && loc =~ '^\(http\|https\):\/\/gist\.github\.com\/'
     redraw
-    echo 'Done: '.res
+    echomsg 'Done: '.loc
   else
     echohl ErrorMsg | echomsg 'Post failed' | echohl None
   endif
-  return res
+  return loc
 endfunction
 
 function! gist#Gist(count, line1, line2, ...)
@@ -718,24 +759,14 @@ function! gist#Gist(count, line1, line2, ...)
       let g:github_token = $GITHUB_TOKEN
     end
   endif
-  if strlen(g:github_user) == 0 || strlen(g:github_token) == 0
-    echohl ErrorMsg
-    echomsg "You have no setting for github."
-    echohl WarningMsg
-    echo "git config --global github.user  your-name"
-    echo "git config --global github.token your-token"
-    echo "or set g:github_user and g:github_token in your vimrc"
-    echo "or set shell env vars GITHUB_USER and GITHUB_TOKEN"
-    echohl None
-    return 0
-  end
-
   let bufname = bufname("%")
   let user = g:github_user
   let token = g:github_token
+  let needtoken = 0
   let gistid = ''
   let gistls = ''
   let gistnm = ''
+  let gistdesc = ' '
   let private = g:gist_private
   let multibuffer = 0
   let clipboard = 0
@@ -744,16 +775,20 @@ function! gist#Gist(count, line1, line2, ...)
   let listmx = '^\%(-l\|--list\)\s*\([^\s]\+\)\?$'
   let bufnamemx = '^' . s:bufprefix .'\zs\([0-9a-f]\+\)\ze$'
 
-  let args = (a:0 > 0) ? split(a:1, ' ') : []
+  let args = (a:0 > 0) ? s:shellwords(a:1) : []
   for arg in args
     if arg =~ '^\(-la\|--listall\)$\C'
       let gistls = '-all'
+    elseif arg =~ '^\(-ls\|--liststar\)$\C'
+      let gistls = 'starred'
+      let needtoken = 1
     elseif arg =~ '^\(-l\|--list\)$\C'
       if g:gist_show_privates
         let gistls = 'mine'
       else
         let gistls = g:github_user
       endif
+      let needtoken = 1
     elseif arg == '--abandon'
       call s:GistGetPage('', '', '', '')
       return
@@ -761,19 +796,48 @@ function! gist#Gist(count, line1, line2, ...)
       let multibuffer = 1
     elseif arg =~ '^\(-p\|--private\)$\C'
       let private = 1
+      let needtoken = 1
     elseif arg =~ '^\(-P\|--public\)$\C'
       let private = 0
     elseif arg =~ '^\(-a\|--anonymous\)$\C'
       let user = ''
       let token = ''
+      let needtoken = 0
+    elseif arg =~ '^\(-s\|--description\)$\C'
+      let gistdesc = ''
     elseif arg =~ '^\(-c\|--clipboard\)$\C'
       let clipboard = 1
     elseif arg =~ '^\(-d\|--delete\)$\C' && bufname =~ bufnamemx
       let deletepost = 1
       let gistid = matchstr(bufname, bufnamemx)
+      let needtoken = 1
     elseif arg =~ '^\(-e\|--edit\)$\C' && bufname =~ bufnamemx
       let editpost = 1
       let gistid = matchstr(bufname, bufnamemx)
+    elseif arg =~ '^\(+1\|--star\)$\C' && bufname =~ bufnamemx
+      let gistid = matchstr(bufname, bufnamemx)
+      let res = s:GistGetPage("https://gist.github.com/star/".gistid, g:github_user, '_method=post', '')
+      let loc = matchstr(res.header, '^Location:')
+      let loc = matchstr(loc, '^[^:]\+: \zs.*')
+      let mx = '^https://gist.github.com/\zs\([0-9a-z]\+\)$'
+      if loc =~ mx
+        echomsg "Stared" gistid
+      else
+        echohl ErrorMsg | echomsg 'Star failed' | echohl None
+      endif
+      return
+    elseif arg =~ '^\(-1\|--unstar\)$\C' && bufname =~ bufnamemx
+      let gistid = matchstr(bufname, bufnamemx)
+      let res = s:GistGetPage("https://gist.github.com/unstar/".gistid, g:github_user, '_method=post', '')
+      let loc = matchstr(res.header, '^Location:')
+      let loc = matchstr(loc, '^[^:]\+: \zs.*')
+      let mx = '^https://gist.github.com/\zs\([0-9a-z]\+\)$'
+      if loc =~ mx
+        echomsg "Unstared" gistid
+      else
+        echohl ErrorMsg | echomsg 'Unstar failed' | echohl None
+      endif
+      return
     elseif arg =~ '^\(-f\|--fork\)$\C' && bufname =~ bufnamemx
       let gistid = matchstr(bufname, bufnamemx)
       let res = s:GistGetPage("https://gist.github.com/fork/".gistid, g:github_user, '', '')
@@ -786,8 +850,11 @@ function! gist#Gist(count, line1, line2, ...)
         echohl ErrorMsg | echomsg 'Fork failed' | echohl None
         return
       endif
+      let needtoken = 1
     elseif arg !~ '^-' && len(gistnm) == 0
-      if editpost == 1 || deletepost == 1
+      if gistdesc != ' '
+        let gistdesc = matchstr(arg, '^\s*\zs.*\ze\s*$')
+      elseif editpost == 1 || deletepost == 1
         let gistnm = arg
       elseif len(gistls) > 0 && arg != '^\w\+$\C'
         let gistls = arg
@@ -808,10 +875,23 @@ function! gist#Gist(count, line1, line2, ...)
   "echo "gistid=".gistid
   "echo "gistls=".gistls
   "echo "gistnm=".gistnm
+  "echo "gistdesc=".gistdesc
   "echo "private=".private
   "echo "clipboard=".clipboard
   "echo "editpost=".editpost
   "echo "deletepost=".deletepost
+
+  if needtoken != 0 && (strlen(g:github_user) == 0 || strlen(g:github_token) == 0)
+    echohl ErrorMsg
+    echomsg "You have no setting for github."
+    echohl WarningMsg
+    echo "git config --global github.user  your-name"
+    echo "git config --global github.token your-token"
+    echo "or set g:github_user and g:github_token in your vimrc"
+    echo "or set shell env vars GITHUB_USER and GITHUB_TOKEN"
+    echohl None
+    return 0
+  end
 
   if len(gistls) > 0
     call s:GistList(user, token, gistls, 1)
@@ -820,7 +900,7 @@ function! gist#Gist(count, line1, line2, ...)
   else
     let url = ''
     if multibuffer == 1
-      let url = s:GistPostBuffers(user, token, private)
+      let url = s:GistPostBuffers(user, token, private, gistdesc)
     else
       if a:count < 1
         let content = join(getline(a:line1, a:line2), "\n")
@@ -832,11 +912,11 @@ function! gist#Gist(count, line1, line2, ...)
         call setreg('"', save_regcont, save_regtype)
       endif
       if editpost == 1
-        let url = s:GistUpdate(user, token, content, gistid, gistnm)
+        let url = s:GistUpdate(user, token, content, gistid, gistnm, gistdesc)
       elseif deletepost == 1
         call s:GistDelete(user, token, gistid)
       else
-        let url = s:GistPost(user, token, content, private)
+        let url = s:GistPost(user, token, content, private, gistdesc)
       endif
     endif
     if len(url) > 0

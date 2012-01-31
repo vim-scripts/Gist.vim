@@ -61,6 +61,12 @@ USAGE                                                 *:Gist* *gist-vim-usage*
 
     :Gist -e foo.js
 <
+- Post/Edit with the description " (you need to have opened the gist buffer
+  first). >
+
+    :Gist -s something
+    :Gist -e -s something
+<
 - Delete the gist (you need to have opened the gist buffer first).
   Password authentication is needed. >
 
@@ -71,6 +77,16 @@ USAGE                                                 *:Gist* *gist-vim-usage*
 
     :Gist -f
 < 
+- Star the gist (you need to have opened the gist buffer first).
+  Password authentication is needed.
+>
+    :Gist +1
+<
+- Unstar the gist (you need to have opened the gist buffer first).
+  Password authentication is needed.
+>
+    :Gist -1
+<
 - Get gist XXXXX. >
 
     :Gist XXXXX
@@ -91,7 +107,10 @@ USAGE                                                 *:Gist* *gist-vim-usage*
 
     :Gist -la
 <
-
+- List gists from your starred gists.
+>
+    :Gist -ls
+<
 ==============================================================================
 TIPS                                                           *gist-vim-tips*
 
