@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 01-Apr-2012.
-" Version: 6.1
+" Last Change: 02-Apr-2012.
+" Version: 6.2
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 " Usage:
@@ -115,6 +115,13 @@
 let s:save_cpo = &cpo
 set cpo&vim
 
+if !exists('g:github_user')
+  let g:github_user = substitute(system('git config --get github.user'), "\n", '', '')
+  if strlen(g:github_user) == 0
+    let g:github_user = $GITHUB_USER
+  end
+endif
+
 function! s:get_browser_command()
   let gist_browser_command = get(g:, 'gist_browser_command', '')
   if gist_browser_command == ''
@@ -211,8 +218,15 @@ function! s:GistList(gistls, page)
     echohl ErrorMsg | echomsg 'Gists not found' | echohl None
     return
   endif
+  let content = json#decode(res.content)
+  if type(content) == 4 && has_key(content, 'message') && len(content.message)
+    bw!
+    redraw
+    echohl ErrorMsg | echomsg content.message | echohl None
+    return
+  endif
 
-  let lines = map(json#decode(res.content), 's:format_gist(v:val)')
+  let lines = map(content, 's:format_gist(v:val)')
   call setline(1, split(join(lines, "\n"), "\n"))
 
   $put='more...'
@@ -261,67 +275,75 @@ function! s:GistWrite(fname)
 endfunction
 
 function! s:GistGet(gistid, clipboard)
-  let winnum = bufwinnr(bufnr(s:bufprefix.a:gistid))
-  if winnum != -1
-    if winnum != bufwinnr('%')
-      exe winnum 'wincmd w'
-    endif
-    setlocal modifiable
-  else
-    exec 'silent noautocmd split' s:bufprefix.a:gistid
-  endif
-  let old_undolevels = &undolevels
-  set undolevels=-1
-  filetype detect
-  silent %d _
+  redraw | echon 'Getting gist... '
   let res = http#get('https://api.github.com/gists/'.a:gistid, '', { "Authorization": s:GetAuthHeader() })
   let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
   if status =~ '^2'
-    call writefile(split(res.content, "\n"), "myjson.js")
-    try
-      let gist = json#decode(res.content)
-      let filename = sort(keys(gist.files))[0]
-      let content = gist.files[filename].content
-      call setline(1, split(content, "\n"))
-      let b:gist = {
-      \ "filename": filename,
-      \ "id": gist.id,
-      \ "description": gist.description,
-      \ "private": gist.public =~ 'true',
-      \}
-    catch
+    let gist = json#decode(res.content)
+    if get(g:, 'gist_get_mutiplefile', 0) != 0
+      let num_file = len(keys(gist.files))
+    else
+      let num_file = 1
+    endif
+    for n in range(num_file)
+      try
+        let filename = sort(keys(gist.files))[n]
+
+        let winnum = bufwinnr(bufnr(s:bufprefix.a:gistid."/".filename))
+        if winnum != -1
+          if winnum != bufwinnr('%')
+            exe winnum 'wincmd w'
+          endif
+          setlocal modifiable
+        else
+          exec 'silent noautocmd split' s:bufprefix.a:gistid."/".filename
+        endif
+        let old_undolevels = &undolevels
+        set undolevels=-1
+        filetype detect
+        silent %d _
+
+        let content = gist.files[filename].content
+        call setline(1, split(content, "\n"))
+        let b:gist = {
+        \ "filename": filename,
+        \ "id": gist.id,
+        \ "description": gist.description,
+        \ "private": gist.public =~ 'true',
+        \}
+      catch
+        let &undolevels = old_undolevels
+        bw!
+        redraw
+        echohl ErrorMsg | echomsg 'Gist contains binary' | echohl None
+        return
+      endtry
       let &undolevels = old_undolevels
-      bw!
-      redraw
-      echohl ErrorMsg | echomsg 'Gist contains binary' | echohl None
-      return
-    endtry
+      setlocal buftype=acwrite bufhidden=delete noswapfile
+      setlocal nomodified
+      doau StdinReadPost <buffer>
+      let gist_detect_filetype = get(g:, 'gist_detect_filetype', 0)
+      if (&ft == '' && gist_detect_filetype == 1) || gist_detect_filetype == 2
+        call s:GistDetectFiletype(a:gistid)
+      endif
+      if a:clipboard
+        if exists('g:gist_clip_command')
+          exec 'silent w !'.g:gist_clip_command
+        elseif has('clipboard')
+          silent! %yank +
+        else
+          %yank
+        endif
+      endif
+      1
+      au! BufWriteCmd <buffer> call s:GistWrite(expand("<amatch>"))
+    endfor
   else
-    let &undolevels = old_undolevels
     bw!
     redraw
     echohl ErrorMsg | echomsg 'Gist not found' | echohl None
     return
   endif
-  let &undolevels = old_undolevels
-  setlocal buftype=acwrite bufhidden=delete noswapfile
-  setlocal nomodified
-  doau StdinReadPost <buffer>
-  let gist_detect_filetype = get(g:, 'gist_detect_filetype', 0)
-  if (&ft == '' && gist_detect_filetype == 1) || gist_detect_filetype == 2
-    call s:GistDetectFiletype(a:gistid)
-  endif
-  if a:clipboard
-    if exists('g:gist_clip_command')
-      exec 'silent w !'.g:gist_clip_command
-    elseif has('clipboard')
-      silent! %yank +
-    else
-      %yank
-    endif
-  endif
-  1
-  au! BufWriteCmd <buffer> call s:GistWrite(expand("<amatch>"))
 endfunction
 
 function! s:GistListAction(shift)
@@ -490,11 +512,9 @@ endfunction
 
 function! gist#Gist(count, line1, line2, ...)
   redraw
-  if !exists('g:github_user')
-    let g:github_user = substitute(system('git config --global github.user'), "\n", '', '')
-    if strlen(g:github_user) == 0
-      let g:github_user = $GITHUB_USER
-    end
+  if strlen(g:github_user) == 0
+    echohl ErrorMsg | echomsg "You don't have github account. read ':help gist-vim-setup'." | echohl None
+    return
   endif
   let bufname = bufname("%")
   let gistid = ''
@@ -508,7 +528,7 @@ function! gist#Gist(count, line1, line2, ...)
   let editpost = 0
   let anonymous = 0
   let listmx = '^\%(-l\|--list\)\s*\([^\s]\+\)\?$'
-  let bufnamemx = '^' . s:bufprefix .'\zs\([0-9a-f]\+\)\ze$'
+  let bufnamemx = '^' . s:bufprefix .'\zs\([0-9a-f]\+\|[0-9a-f]\+[/\\].*\)\ze$'
 
   let args = (a:0 > 0) ? s:shellwords(a:1) : []
   for arg in args
@@ -580,12 +600,12 @@ function! gist#Gist(count, line1, line2, ...)
       elseif arg =~ '^[0-9a-z]\+$\C'
         let gistid = arg
       else
-        echohl ErrorMsg | echomsg 'Invalid arguments' | echohl None
+        echohl ErrorMsg | echomsg 'Invalid arguments: '.arg | echohl None
         unlet args
         return 0
       endif
     elseif len(arg) > 0
-      echohl ErrorMsg | echomsg 'Invalid arguments' | echohl None
+      echohl ErrorMsg | echomsg 'Invalid arguments: '.arg | echohl None
       unlet args
       return 0
     endif
@@ -617,6 +637,12 @@ function! gist#Gist(count, line1, line2, ...)
         silent! normal! gvy
         let content = @"
         call setreg('"', save_regcont, save_regtype)
+      endif
+      " find GistID: in content , then we should just update
+      let id = matchstr(content, '\(GistID:\s*\)\@<=[0-9]\+')
+      if len(id) > 0
+        let gistid = id
+        let editpost = 1
       endif
       if editpost == 1
         let url = s:GistUpdate(content, gistid, gistnm, gistdesc)
@@ -652,6 +678,10 @@ function! gist#Gist(count, line1, line2, ...)
 endfunction
 
 function! s:GetAuthHeader()
+  if get(g:, 'gist_use_password_in_gitconfig', 0) != 0
+    let password = substitute(system('git config --get github.password'), "\n", '', '')
+    return printf("basic %s", base64#b64encode(g:github_user.":".password))
+  endif
   let auth = ""
   let configfile = expand('~/.gist-vim')
   if filereadable(configfile)
@@ -671,12 +701,6 @@ function! s:GetAuthHeader()
   echohl None
   let api = inputlist(['Which API:', '1. basic auth', '2. oauth2'])
   if api == 1
-    if !exists('g:github_user')
-      let g:github_user = substitute(system('git config --global github.user'), "\n", '', '')
-      if strlen(g:github_user) == 0
-        let g:github_user = $GITHUB_USER
-      end
-    endif
     redraw | echo "\r"
     let password = inputsecret("Password:")
     let secret = printf("basic %s", base64#b64encode(g:github_user.":".password))
