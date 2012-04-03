@@ -1,116 +1,10 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 02-Apr-2012.
-" Version: 6.2
+" Last Change: 03-Apr-2012.
+" Version: 6.3
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
-" Usage:
-"
-"   :Gist
-"     post current buffer to gist, using default privicy option
-"     (see g:gist_post_private)
-"
-"   :'<,'>Gist
-"     post selected text to gist., using default privicy option
-"     This applies to all permutations listed below (except multi)
-"     (see g:gist_show_private)
-"
-"   :Gist -p
-"     create a private gist
-"
-"   :Gist -P
-"     create a public gist
-"     (only relevant if you've set gists to be private by default)
-"
-"   :Gist -P
-"     post whole text to gist as public
-"     This is only relevant if you've set gists to be private by default
-"   :Gist -a
-"     create a gist anonymously
-"
-"   :Gist -m
-"     create a gist with all open buffers
-"
-"   :Gist -e
-"     edit the gist. (you need to have opend the gist buffer first)
-"     you can update the gist with :w command on gist buffer
-"
-"   :Gist -d
-"     delete the gist. (you need to have opend the gist buffer first)
-"     password authentication is needed
-"
-"   :Gist -f
-"     fork the gist. (you need to have opend the gist buffer first)
-"     password authentication is needed
-"
-"   :Gist -e foo.js
-"     edit the gist with name 'foo.js'. (you need to have opend the gist buffer first)
-"
-"   :Gist XXXXX
-"     get gist XXXXX
-"
-"   :Gist -c XXXXX
-"     get gist XXXXX and add to clipboard
-"
-"   :Gist -l
-"     list your public gists
-"
-"   :Gist -l mattn
-"     list gists from mattn
-"
-"   :Gist -la
-"     list all your (public and private) gists
-"
-" Tips:
-"   * if set g:gist_clip_command, gist.vim will copy the gist code
-"       with option '-c'.
-"
-"     # mac
-"     let g:gist_clip_command = 'pbcopy'
-"
-"     # linux
-"     let g:gist_clip_command = 'xclip -selection clipboard'
-"
-"     # others(cygwin?)
-"     let g:gist_clip_command = 'putclip'
-"
-"   * if you want to detect filetype from gist's filename...
-"
-"     # detect filetype if vim failed auto-detection.
-"     let g:gist_detect_filetype = 1
-"
-"     # detect filetype always.
-"     let g:gist_detect_filetype = 2
-"
-"   * if you want to open browser after the post...
-"
-"     let g:gist_open_browser_after_post = 1
-"
-"   * if you want to change the browser...
-"
-"     let g:gist_browser_command = 'w3m %URL%'
-"
-"       or
-"
-"     let g:gist_browser_command = 'opera %URL% &'
-"
-"     on windows, should work with original setting.
-"
-"   * if you want to show your private gists with ':Gist -l'
-"
-"     let g:gist_show_privates = 1
-"
-"   * if don't you want to copy URL of the post...
-"
-"     let g:gist_put_url_to_clipboard_after_post = 0
-"
-"     or if you want to copy URL and add linefeed at the last of URL,
-"
-"     let g:gist_put_url_to_clipboard_after_post = 2
-"
-"     default value is 1.
-"
 
 let s:save_cpo = &cpo
 set cpo&vim
@@ -280,7 +174,7 @@ function! s:GistGet(gistid, clipboard)
   let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
   if status =~ '^2'
     let gist = json#decode(res.content)
-    if get(g:, 'gist_get_mutiplefile', 0) != 0
+    if get(g:, 'gist_get_multiplefile', 0) != 0
       let num_file = len(keys(gist.files))
     else
       let num_file = 1
@@ -695,9 +589,9 @@ function! s:GetAuthHeader()
   endif
 
   echohl WarningMsg
-  echo 'Gist.vim need autholization to github API. This settings are stored in "~/.gist-vim". If you want to revoke, do "rm ~/.gist-vim".'
+  echo 'Gist.vim requires authorization to use the Github API. These settings are stored in "~/.gist-vim". If you want to revoke, do "rm ~/.gist-vim".'
   echohl ErrorMsg
-  echo 'Note to do "chmod 600 ~/.gist-vim" after this settings.'
+  echo 'Be sure to run "chmod 600 ~/.gist-vim" after finishing setup.'
   echohl None
   let api = inputlist(['Which API:', '1. basic auth', '2. oauth2'])
   if api == 1
