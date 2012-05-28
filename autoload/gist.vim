@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 02-May-2012.
-" Version: 6.6
+" Last Change: 28-May-2012.
+" Version: 6.7
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 
@@ -49,7 +49,7 @@ function! s:open_browser(url)
     silent! exec cmd
   elseif cmd =~ '^:[A-Z]'
     let cmd = substitute(cmd, '%URL%', '\=a:url', 'g')
-    exec cmd url
+    exec cmd
   else
     let cmd = substitute(cmd, '%URL%', '\=shellescape(a:url)', 'g')
     call system(cmd)
@@ -270,11 +270,24 @@ function! s:GistUpdate(content, gistid, gistnm, desc)
     if has_key(b:gist, 'description') | let gist["description"] = b:gist.description | endif
     if has_key(b:gist, 'filename') | let filename = b:gist.filename | endif
   else
-    if a:desc != ' ' | let gist["description"] = a:desc | endif
     let filename = a:gistnm
     if len(filename) == 0 | let filename = s:GistGetFileName(a:gistid) | endif
     if len(filename) == 0 | let filename = s:get_current_filename(1) | endif
   endif
+
+  " Update description
+  " If no new description specified, keep the old description
+  if a:desc != ' '
+    let gist["description"] = a:desc
+  else
+    let res = webapi#http#get('https://api.github.com/gists/'.a:gistid, '', { "Authorization": s:GetAuthHeader() })
+    let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
+    if status =~ '^2'
+      let old_gist = webapi#json#decode(res.content)
+      let gist["description"] = old_gist.description
+    endif
+  endif
+
   let gist.files[filename] = { "content": a:content, "filename": filename }
 
   redraw | echon 'Updating gist... '
@@ -296,7 +309,7 @@ function! s:GistUpdate(content, gistid, gistnm, desc)
 endfunction
 
 function! s:GistDelete(gistid)
-  redraw | echon 'Deleting to gist... '
+  redraw | echon 'Deleting gist... '
   let res = webapi#http#post('https://api.github.com/gists/'.a:gistid, '', { "Authorization": s:GetAuthHeader() }, 'DELETE')
   let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
   if status =~ '^2'
@@ -313,7 +326,7 @@ endfunction
 function! s:get_current_filename(no)
   let filename = expand('%:t')
   if len(filename) == 0 && &ft != ''
-    let pair = filter(items(s:extmap), 'v:val[1] == "ruby"')
+    let pair = filter(items(s:extmap), 'v:val[1] == &ft')
     if len(pair) > 0
       let filename = printf('gistfile%d%s', a:no, pair[0][0])
     endif
@@ -431,7 +444,7 @@ function! gist#Gist(count, line1, line2, ...)
   if bufname =~ bufnamemx
     let gistidbuf = matchstr(bufname, bufnamemx)
   else
-    let gistidbuf = matchstr(join(getline(a:line1, a:line2), "\n"), '\(GistID:\s*\)\@<=[0-9]\+')
+    let gistidbuf = matchstr(join(getline(a:line1, a:line2), "\n"), '\(GistID:\s*\)\@<=\S\+')
   endif
 
   let args = (a:0 > 0) ? s:shellwords(a:1) : []
