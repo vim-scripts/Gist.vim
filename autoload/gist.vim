@@ -1,8 +1,8 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 09-Jul-2012.
-" Version: 6.8
+" Last Change: 07-Sep-2012.
+" Version: 6.9
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 
@@ -12,7 +12,8 @@ set cpo&vim
 let s:configfile = expand('~/.gist-vim')
 
 if !exists('g:github_user')
-  let g:github_user = substitute(system('git config --get github.user'), "\n", '', '')
+  let s:system = function(get(g:, 'webapi#system_function', 'system'))
+  let g:github_user = substitute(s:system('git config --get github.user'), "\n", '', '')
   if strlen(g:github_user) == 0
     let g:github_user = $GITHUB_USER
   end
@@ -23,7 +24,7 @@ function! s:get_browser_command()
   if gist_browser_command == ''
     if has('win32') || has('win64')
       let gist_browser_command = '!start rundll32 url.dll,FileProtocolHandler %URL%'
-    elseif has('mac')
+    elseif has('mac') || has('macunix') || has('gui_macvim') || system('uname') =~? '^darwin'
       let gist_browser_command = 'open %URL%'
     elseif executable('xdg-open')
       let gist_browser_command = 'xdg-open %URL%'
@@ -224,7 +225,9 @@ function! s:GistGet(gistid, clipboard)
           endif
           setlocal modifiable
         else
-          exec 'silent noautocmd split' s:bufprefix.a:gistid."/".fnameescape(filename)
+          exec 'silent noautocmd new'
+          setlocal noswapfile
+          exec 'noautocmd file' s:bufprefix.a:gistid."/".fnameescape(filename)
         endif
         set undolevels=-1
         filetype detect
@@ -516,7 +519,10 @@ function! gist#Gist(count, line1, line2, ...)
 
   let args = (a:0 > 0) ? s:shellwords(a:1) : []
   for arg in args
-    if arg =~ '^\(-la\|--listall\)$\C'
+    if arg =~ '^\(-h\|--help\)$\C'
+      help :Gist
+      return
+    elseif arg =~ '^\(-la\|--listall\)$\C'
       let gistls = '-all'
     elseif arg =~ '^\(-ls\|--liststar\)$\C'
       let gistls = 'starred'
