@@ -142,15 +142,13 @@ If you want to manipulate multiple files in a gist:
 
     let g:gist_get_multiplefile = 1
 
+If you want to use on Github Enterprise:
+
+    let g:github_api_url = 'http://your-github-enterprise-domain/api/v3'
+
 You need to either set global git config:
 
 	$ git config --global github.user Username
-
-## Requirements:
-
-- curl command (http://curl.haxx.se/)
-- webapi-vim (https://github.com/mattn/webapi-vim)
-- and if you want to use your git profile, the git command-line client.
 
 ## License:
 
@@ -183,10 +181,24 @@ Copy it to your plugin directory.
 gist.vim will create a curl cookie-jar file in your runtimepath.
 
 - rtp:
+  - autoload/gist.vim
   - plugin/gist.vim
-  - cookies/github
 
 If you want to uninstall gist.vim, remember to also remove `~/.gist-vim`.
+
+You need to install webapi-vim also:
+
+  http://www.vim.org/scripts/script.php?script_id=4019
+
+If you want to use latest one:
+
+  https://github.com/mattn/webapi-vim
+
+## Requirements:
+
+- curl command (http://curl.haxx.se/)
+- webapi-vim (https://github.com/mattn/webapi-vim)
+- and if you want to use your git profile, the git command-line client.
 
 ## Setup:
 

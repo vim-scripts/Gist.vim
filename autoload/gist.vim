@@ -1,13 +1,23 @@
 "=============================================================================
 " File: gist.vim
 " Author: Yasuhiro Matsumoto <mattn.jp@gmail.com>
-" Last Change: 27-Sep-2012.
-" Version: 7.0
+" Last Change: 13-Dec-2012.
+" Version: 7.1
 " WebPage: http://github.com/mattn/gist-vim
 " License: BSD
 
 let s:save_cpo = &cpo
 set cpo&vim
+
+if !exists('g:github_user') && !executable('git')
+  echohl ErrorMsg | echomsg "Gist: require 'git' command" | echohl None
+  finish
+endif
+
+if !executable('curl')
+  echohl ErrorMsg | echomsg "Gist: require 'curl' command" | echohl None
+  finish
+endif
 
 let s:configfile = expand('~/.gist-vim')
 
@@ -17,6 +27,10 @@ if !exists('g:github_user')
   if strlen(g:github_user) == 0
     let g:github_user = $GITHUB_USER
   end
+endif
+
+if !exists('g:github_api_url')
+  let g:github_api_url = 'https://api.github.com'
 endif
 
 function! s:get_browser_command()
@@ -85,13 +99,13 @@ endfunction
 let s:bufprefix = 'gist' . (has('unix') ? ':' : '_')
 function! s:GistList(gistls, page)
   if a:gistls == '-all'
-    let url = 'https://api.github.com/gists/public'
+    let url = g:github_api_url.'/gists/public'
   elseif get(g:, 'gist_show_privates', 0) && a:gistls == 'starred'
-    let url = 'https://api.github.com/gists/starred'
+    let url = g:github_api_url.'/gists/starred'
   elseif get(g:, 'gist_show_privates') && a:gistls == 'mine'
-    let url = 'https://api.github.com/gists'
+    let url = g:github_api_url.'/gists'
   else
-    let url = 'https://api.github.com/users/'.a:gistls.'/gists'
+    let url = g:github_api_url.'/users/'.a:gistls.'/gists'
   endif
   let winnum = bufwinnr(bufnr(s:bufprefix.a:gistls))
   if winnum != -1
@@ -160,13 +174,13 @@ endfunction
 function! gist#list(user, ...)
   let page = get(a:000, 0, 0)
   if a:user == '-all'
-    let url = 'https://api.github.com/gists/public'
+    let url = g:github_api_url.'/gists/public'
   elseif get(g:, 'gist_show_privates', 0) && a:user == 'starred'
-    let url = 'https://api.github.com/gists/starred'
+    let url = g:github_api_url.'/gists/starred'
   elseif get(g:, 'gist_show_privates') && a:user == 'mine'
-    let url = 'https://api.github.com/gists'
+    let url = g:github_api_url.'/gists'
   else
-    let url = 'https://api.github.com/users/'.a:user.'/gists'
+    let url = g:github_api_url.'/users/'.a:user.'/gists'
   endif
 
   let auth = s:GistGetAuthHeader()
@@ -182,7 +196,7 @@ function! s:GistGetFileName(gistid)
   if len(auth) == 0
     return ''
   endif
-  let res = webapi#http#get('https://api.github.com/gists/'.a:gistid, '', { "Authorization": auth })
+  let res = webapi#http#get(g:github_api_url.'/gists/'.a:gistid, '', { "Authorization": auth })
   let gist = webapi#json#decode(res.content)
   if has_key(gist, 'files')
     return sort(keys(gist.files))[0]
@@ -195,7 +209,7 @@ function! s:GistDetectFiletype(gistid)
   if len(auth) == 0
     return ''
   endif
-  let res = webapi#http#get('https://api.github.com/gists/'.a:gistid, '', { "Authorization": auth })
+  let res = webapi#http#get(g:github_api_url.'/gists/'.a:gistid, '', { "Authorization": auth })
   let gist = webapi#json#decode(res.content)
   let filename = sort(keys(gist.files))[0]
   let ext = fnamemodify(filename, ':e')
@@ -219,7 +233,7 @@ endfunction
 
 function! s:GistGet(gistid, clipboard)
   redraw | echon 'Getting gist... '
-  let res = webapi#http#get('https://api.github.com/gists/'.a:gistid, '', { "Authorization": s:GistGetAuthHeader() })
+  let res = webapi#http#get(g:github_api_url.'/gists/'.a:gistid, '', { "Authorization": s:GistGetAuthHeader() })
   let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
   if status =~ '^2'
     let gist = webapi#json#decode(res.content)
@@ -338,7 +352,7 @@ function! s:GistUpdate(content, gistid, gistnm, desc)
   if a:desc != ' '
     let gist["description"] = a:desc
   else
-    let res = webapi#http#get('https://api.github.com/gists/'.a:gistid, '', { "Authorization": auth })
+    let res = webapi#http#get(g:github_api_url.'/gists/'.a:gistid, '', { "Authorization": auth })
     let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
     if status =~ '^2'
       let old_gist = webapi#json#decode(res.content)
@@ -349,7 +363,7 @@ function! s:GistUpdate(content, gistid, gistnm, desc)
   let gist.files[filename] = { "content": a:content, "filename": filename }
 
   redraw | echon 'Updating gist... '
-  let res = webapi#http#post('https://api.github.com/gists/' . a:gistid,
+  let res = webapi#http#post(g:github_api_url.'/gists/' . a:gistid,
   \ webapi#json#encode(gist), {
   \   "Authorization": auth,
   \   "Content-Type": "application/json",
@@ -378,7 +392,7 @@ function! s:GistDelete(gistid)
   endif
 
   redraw | echon 'Deleting gist... '
-  let res = webapi#http#post('https://api.github.com/gists/'.a:gistid, '', {
+  let res = webapi#http#post(g:github_api_url.'/gists/'.a:gistid, '', {
   \   "Authorization": auth,
   \   "Content-Type": "application/json",
   \}, 'DELETE')
@@ -442,7 +456,7 @@ function! s:GistPost(content, private, desc, anonymous)
   endif
 
   redraw | echon 'Posting it to gist... '
-  let res = webapi#http#post('https://api.github.com/gists', webapi#json#encode(gist), header)
+  let res = webapi#http#post(g:github_api_url.'/gists', webapi#json#encode(gist), header)
   let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
   if status =~ '^2'
     let obj = webapi#json#decode(res.content)
@@ -497,7 +511,7 @@ function! s:GistPostBuffers(private, desc, anonymous)
   endif
 
   redraw | echon 'Posting it to gist... '
-  let res = webapi#http#post('https://api.github.com/gists', webapi#json#encode(gist), header)
+  let res = webapi#http#post(g:github_api_url.'/gists', webapi#json#encode(gist), header)
   let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
   if status =~ '^2'
     let obj = webapi#json#decode(res.content)
@@ -577,7 +591,7 @@ function! gist#Gist(count, line1, line2, ...)
         echohl ErrorMsg | echomsg 'Canceled' | echohl None
       else
         let gistid = gistidbuf
-        let res = webapi#http#post('https://api.github.com/gists/'.gistid.'/star', '', { "Authorization": auth }, 'PUT')
+        let res = webapi#http#post(g:github_api_url.'/gists/'.gistid.'/star', '', { "Authorization": auth }, 'PUT')
         let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
         if status =~ '^2'
           echomsg "Stared" gistid
@@ -592,7 +606,7 @@ function! gist#Gist(count, line1, line2, ...)
         echohl ErrorMsg | echomsg 'Canceled' | echohl None
       else
         let gistid = gistidbuf
-        let res = webapi#http#post('https://api.github.com/gists/'.gistid.'/star', '', { "Authorization": auth }, 'DELETE')
+        let res = webapi#http#post(g:github_api_url.'/gists/'.gistid.'/star', '', { "Authorization": auth }, 'DELETE')
         if status =~ '^2'
           echomsg "Unstared" gistid
         else
@@ -607,7 +621,7 @@ function! gist#Gist(count, line1, line2, ...)
         return
       else
         let gistid = gistidbuf
-        let res = webapi#http#post('https://api.github.com/gists/'.gistid.'/fork', '', { "Authorization": auth })
+        let res = webapi#http#post(g:github_api_url.'/gists/'.gistid.'/fork', '', { "Authorization": auth })
         let status = matchstr(matchstr(res.header, '^Status:'), '^[^:]\+: \zs.*')
         if status =~ '^2'
           let obj = webapi#json#decode(res.content)
@@ -727,7 +741,7 @@ function! s:GistGetAuthHeader()
   let password = inputsecret("Github Password for ".g:github_user.":")
   if len(password) > 0
     let insecureSecret = printf("basic %s", webapi#base64#b64encode(g:github_user.":".password))
-    let res = webapi#http#post('https://api.github.com/authorizations', webapi#json#encode({
+    let res = webapi#http#post(g:github_api_url.'/authorizations', webapi#json#encode({
                 \  "scopes"   : ["gist"],
                 \  "note"     : "Gist.vim on ".hostname(),
                 \  "note_url" : "http://www.vim.org/scripts/script.php?script_id=2423"
